@@ -1,0 +1,165 @@
+<html>
+	<head>
+		<title>Optical Flow Test</title>
+		<style>
+			body { margin: 0; }
+			canvas { width: 100%; height: 100% }
+		</style>
+	</head>
+	<body>
+	
+	
+<script type="x-shader/x-vertex" id="vertexShader">  
+attribute vec3 barycentric;
+varying vec3 baryc;
+varying vec2 opticalFlow;
+uniform mat4 prevCamView;
+uniform float useClamp;
+
+void main() {  
+	baryc = barycentric; 
+	
+	gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 prevPos = prevCamView * modelMatrix * vec4(position, 1.0);
+    
+	vec2 coord0 = (gl_Position.xy / gl_Position.w + 1.0) / 2.0; 
+	vec2 coord1 = (prevPos.xy / prevPos.w + 1.0) / 2.0; 
+	
+	opticalFlow = abs(coord0 - coord1) * 15.0;
+	opticalFlow = clamp(opticalFlow, vec2(0.0), vec2(1.0));
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fragmentShader">  
+varying vec3 baryc;
+varying vec2 opticalFlow;
+
+float edgeFactor(vec3 vBC){
+    vec3 d = fwidth(vBC);							// abs(dFdx(vBC)) + abs(dFdy(vBC))
+    vec3 a3 = smoothstep(vec3(0.0), d*1.5, vBC);	// anti-aliasing
+    return min(min(a3.x, a3.y), a3.z);
+}
+
+void main() {
+	// rendering the optical flow
+	gl_FragColor = vec4(opticalFlow.xy, 0.0, 1.0);
+	
+	// rendering the dge with barycentric coordinates
+	gl_FragColor = mix( vec4(1.0), gl_FragColor, edgeFactor(baryc)); 
+}
+</script>  
+
+
+<script src="js/three.min.js"></script>
+<script src="js/mousetrap.min.js"></script>
+<script src="js/dat.gui.min.js"></script>
+<script>
+var scene = new THREE.Scene();
+var camera = new THREE.PerspectiveCamera( 75, window.innerWidth/window.innerHeight, 0.1, 1000 );
+var firstFrame = true; 
+var goUp = true, goLeft = true; 
+
+var renderer = new THREE.WebGLRenderer();
+renderer.setSize( window.innerWidth, window.innerHeight );
+document.body.appendChild( renderer.domElement );
+var pause = false; 
+			
+var geometry = new THREE.BoxBufferGeometry( 1, 1, 15 );
+			
+var prevPV = new THREE.Matrix4();
+
+var material = new THREE.ShaderMaterial( {
+	uniforms: {
+		time: { value: 1.0 },
+		resolution: { value: new THREE.Vector2() },
+		prevCamView: { value: prevPV },
+		useClamp: {value: 1.0},
+	},
+	vertexShader: document.getElementById( 'vertexShader' ).textContent,
+	fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+
+} );
+var useClamp = 1.0; 
+var n = geometry.attributes.position.count; 
+console.log(n);
+var barycentric = new Float32Array( n * 3 );
+var assignedColor = new Float32Array( n * 3 );
+var prevPosition = new Float32Array( n * 3 );
+
+for ( var i = 0; i < n * 3; i += 9 ) {
+	if (i + 2 < n * 3) {
+		barycentric[i + 0] = 1;
+		barycentric[i + 1] = 0;
+		barycentric[i + 2] = 0;
+	}  
+	if (i + 5 < n * 3) {
+		barycentric[i + 3] = 0;
+		barycentric[i + 4] = 1;
+		barycentric[i + 5] = 0;
+	}  
+	if (i + 8 < n * 3) {
+		barycentric[i + 6] = 0;
+		barycentric[i + 7] = 0;
+		barycentric[i + 8] = 1;
+	}
+}
+
+		
+for (var i = 0; i < prevPosition.length; ++i) {
+	prevPosition[i] = i;
+}
+geometry.addAttribute( 'prevPosition', new THREE.BufferAttribute( prevPosition, 3 ) );
+geometry.addAttribute( 'barycentric', new THREE.BufferAttribute( barycentric, 3 ) );
+
+material.extensions.derivatives = true;
+var cube = new THREE.Mesh( geometry, material );
+cube.rotation.x = 0.6;
+cube.rotation.y = 0.6;
+
+scene.add( cube );
+
+camera.position.z = 5;
+
+var render = function () {
+	requestAnimationFrame( render );
+
+	if (!pause) {
+		if (goUp) {
+			camera.position.y += 0.1;
+		} else {
+			camera.position.y -= 0.1;
+		}
+		if (camera.position.y > 5.0) goUp = false; 
+		if (camera.position.y < -2.0) goUp = true; 
+
+		if (goLeft) {
+			camera.position.x += 0.3;
+		} else {
+			camera.position.x -= 0.05;
+		}
+		if (camera.position.x > 2.0) goLeft = false; 
+		if (camera.position.x < -4.0) goLeft = true; 
+		camera.updateMatrix(); 
+	} 
+	material.uniforms.useClamp = useClamp; 
+	renderer.render(scene, camera);
+	
+	if (!pause) {
+		prevPV.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+	}
+};
+
+render();
+
+Mousetrap.bind('space', function() { 
+	pause = !pause;
+}, 'keydown');
+
+
+Mousetrap.bind('enter', function() { 
+	useClamp = 1.0 - useClamp; 
+}, 'keydown');
+
+</script>
+	</body>
+</html>
